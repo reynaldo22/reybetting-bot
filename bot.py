@@ -30,6 +30,7 @@ from analyzer  import analyze_soccer, analyze_nba
 from formatter import format_result, format_help
 from db        import get_bankroll, set_bankroll, log_bet, recent_bets, format_log
 from ev_calc   import bankroll_mode
+from fetcher   import fetch_match
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -243,6 +244,39 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(format_log(rows), parse_mode=ParseMode.MARKDOWN)
 
 
+# ── /fetch ────────────────────────────────────────────────────────────────────
+
+async def cmd_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Auto-fetch match data from ESPN.
+    Usage:
+      /fetch Arsenal vs Bournemouth EPL
+      /fetch Lakers vs Warriors NBA
+    """
+    if not await auth(update): return
+
+    full_text = update.message.text or ""
+    body = full_text.split(None, 1)[1].strip() if " " in full_text else ""
+
+    if not body:
+        await update.message.reply_text(
+            "Usage:\n"
+            "`/fetch Arsenal vs Bournemouth EPL`\n"
+            "`/fetch Barcelona vs Atletico La Liga`\n"
+            "`/fetch Lakers vs Warriors NBA`",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    msg = await update.message.reply_text("⏳ Fetching match data from ESPN...")
+
+    try:
+        result = await fetch_match(body)
+        await msg.edit_text(result, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}")
+
+
 # ── Natural language handler ──────────────────────────────────────────────────
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -306,6 +340,7 @@ def main():
     app.add_handler(CommandHandler("setbank", cmd_setbank))
     app.add_handler(CommandHandler("logbet",  cmd_logbet))
     app.add_handler(CommandHandler("log",     cmd_log))
+    app.add_handler(CommandHandler("fetch",   cmd_fetch))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
