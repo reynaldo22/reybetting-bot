@@ -1,0 +1,6 @@
+.env
+bets.db
+bot.log
+__pycache__/
+*.pyc
+*.db
