@@ -10,6 +10,7 @@ Usage:
 import httpx
 import asyncio
 import re
+import unicodedata
 from typing import Optional
 from datetime import datetime, timezone
 
@@ -20,8 +21,35 @@ SOCCER_LEAGUES = {
     "serie a": "ita.1", "seriea": "ita.1", "italy": "ita.1",
     "bundesliga": "ger.1", "germany": "ger.1",
     "ligue 1": "fra.1", "ligue1": "fra.1", "france": "fra.1",
-    "ucl": "uefa.champions", "champions league": "uefa.champions",
+    "ucl": "uefa.champions", "champions": "uefa.champions",
+    "champions league": "uefa.champions", "uefa": "uefa.champions",
     "eredivisie": "ned.1", "netherlands": "ned.1",
+}
+
+UCL_CODES = {"uefa.champions"}
+
+# Common team name aliases for search
+SOCCER_ALIASES = {
+    "psg": "paris saint-germain", "paris": "paris saint-germain",
+    "atletico": "atletico madrid", "atletico madrid": "atletico madrid",
+    "man utd": "manchester united", "man united": "manchester united",
+    "man city": "manchester city",
+    "spurs": "tottenham hotspur", "tottenham": "tottenham hotspur",
+    "wolves": "wolverhampton",
+    "inter": "internazionale", "inter milan": "internazionale",
+    "ac milan": "ac milan", "milan": "ac milan",
+    "bvb": "borussia dortmund", "dortmund": "borussia dortmund",
+    "rb leipzig": "rb leipzig", "leipzig": "rb leipzig",
+    "ajax": "ajax amsterdam",
+    "benfica": "sl benfica",
+    "porto": "fc porto",
+    "celtic": "celtic fc",
+    "real madrid": "real madrid", "real": "real madrid",
+    "barca": "barcelona", "fcb": "barcelona",
+    "juve": "juventus",
+    "roma": "as roma",
+    "napoli": "ssc napoli",
+    "leverkusen": "bayer leverkusen",
 }
 
 HEADERS = {
@@ -49,8 +77,11 @@ def _get_score(competitor: dict) -> int:
 
 
 def _normalize(name: str) -> str:
-    """Lowercase, remove punctuation for fuzzy matching."""
-    return re.sub(r"[^a-z0-9 ]", "", name.lower().strip())
+    """Lowercase, strip accents, remove punctuation for fuzzy matching."""
+    # Strip accents: é→e, ó→o, ü→u etc.
+    nfkd = unicodedata.normalize("NFKD", name)
+    ascii_str = nfkd.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9 ]", "", ascii_str.lower().strip())
 
 
 def _team_match(query: str, candidate: str) -> bool:
@@ -71,12 +102,16 @@ async def _soccer_teams(league_code: str) -> list:
 
 
 async def _find_soccer_team(name: str, league_code: str) -> Optional[dict]:
+    # Apply alias first
+    resolved = SOCCER_ALIASES.get(name.lower().strip(), name)
     teams = await _soccer_teams(league_code)
     for t in teams:
         team = t.get("team", {})
-        if _team_match(name, team.get("displayName", "")) or \
-           _team_match(name, team.get("shortDisplayName", "")) or \
-           _team_match(name, team.get("name", "")):
+        if _team_match(resolved, team.get("displayName", "")) or \
+           _team_match(resolved, team.get("shortDisplayName", "")) or \
+           _team_match(resolved, team.get("name", "")) or \
+           _team_match(name, team.get("displayName", "")) or \
+           _team_match(name, team.get("shortDisplayName", "")):
             return team
     return None
 
@@ -206,6 +241,9 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
     def form_str(form):
         return " | ".join(f"{h}-{a}" for h, a, _ in form) if form else "N/A"
 
+    is_ucl  = league_code in UCL_CODES
+    ucl_str = "knockout" if is_ucl else "no"
+
     return (
         f"✅ *Data fetched! Add odds then copy & send /soccer*\n\n"
         f"📋 *Recent form:*\n"
@@ -219,7 +257,7 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
         f"Home inj: {home_inj_str}\n"
         f"Away inj: {away_inj_str}\n"
         f"Relegation: none\n"
-        f"UCL: no\n"
+        f"UCL: {ucl_str}\n"
         f"Fwd: none\n"
         f"\n"
         f"[PASTE ODDS BELOW]\n"
