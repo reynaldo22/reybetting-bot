@@ -398,7 +398,7 @@ async def fetch_nba(home_name: str, away_name: str) -> str:
 
         # Use scoreboard date-range approach (works year-round, including playoffs)
         all_games, all_injuries = await asyncio.gather(
-            _nba_recent_games(days=60),
+            _nba_recent_games(days=120),  # full season lookback
             _nba_injuries(),
         )
 
