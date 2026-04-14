@@ -65,8 +65,13 @@ def check_rules(ctx: dict) -> list:
         })
 
     # ── RULE 21 — Simeone UCL premium ───────────────────────────────────────
+    import unicodedata
+    def _strip(s):
+        nfkd = unicodedata.normalize("NFKD", s)
+        return nfkd.encode("ascii", "ignore").decode("ascii").lower()
+
     if ctx.get("ucl_knockout"):
-        teams = [home.lower(), away.lower()]
+        teams = [_strip(home), _strip(away)]
         if any("atletico" in t for t in teams):
             issues.append({
                 "rule": 21, "level": "WARNING",
