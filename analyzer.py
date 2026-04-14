@@ -213,6 +213,114 @@ def analyze_nba(data: dict) -> dict:
     }
 
 
+# ── NHL analysis ──────────────────────────────────────────────────────────────
+
+def _nhl_freqs(h2h: list) -> dict:
+    n = len(h2h)
+    if n == 0:
+        return {}
+
+    home_w  = sum(1 for r in h2h if r["home"] > r["away"])
+    away_w  = n - home_w
+    totals  = [r["home"] + r["away"] for r in h2h]
+    avg_t   = sum(totals) / n
+    margins = [abs(r["home"] - r["away"]) for r in h2h]
+    close   = sum(1 for m in margins if m <= 1)  # games within 1 goal
+
+    o55 = sum(1 for t in totals if t > 5.5)
+    o65 = sum(1 for t in totals if t > 6.5)
+    bts = sum(1 for r in h2h if r["home"] > 0 and r["away"] > 0)
+
+    return {
+        "n": n, "avg_total": round(avg_t, 1),
+        "w1": round(home_w / n, 3),
+        "w2": round(away_w / n, 3),
+        "over_5_5": round(o55 / n, 3),
+        "under_5_5": round((n - o55) / n, 3),
+        "over_6_5": round(o65 / n, 3),
+        "under_6_5": round((n - o65) / n, 3),
+        "bts_yes": round(bts / n, 3),
+        "h2h_close_pct": round(close / n, 3),
+        "_totals": totals,
+    }
+
+
+def analyze_nhl(data: dict) -> dict:
+    h2h      = data["h2h"]
+    freqs    = _nhl_freqs(h2h)
+    bankroll = data["bankroll"]
+    ctx      = {
+        **data["context"],
+        "sport": "nhl",
+        "home_team": data["home_team"],
+        "away_team": data["away_team"],
+        "h2h_count": len(h2h),
+        "h2h_close_pct": freqs.get("h2h_close_pct", 0),
+    }
+    issues   = check_rules(ctx)
+
+    skip_set = set()
+    dg_map   = {}
+    for issue in issues:
+        skip_set.update(issue.get("skip", []))
+        for mkt, n in issue.get("downgrade", {}).items():
+            dg_map[mkt] = dg_map.get(mkt, 0) + n
+
+    markets = []
+    odds    = data["odds"]
+    totals  = freqs.get("_totals", [])
+    n       = freqs.get("n", 1) or 1
+
+    # W1 / W2
+    for key, label in [("w1", "Home Win (ML)"), ("w2", "Away Win (ML)")]:
+        if key in odds:
+            _add_market(markets, key, label, freqs.get(key, 0), odds[key], skip_set, dg_map, bankroll)
+
+    # Over/Under 5.5
+    if "over_5_5" in odds:
+        _add_market(markets, "over_5_5", "Over 5.5", freqs.get("over_5_5", 0), odds["over_5_5"], skip_set, dg_map, bankroll)
+    if "under_5_5" in odds:
+        _add_market(markets, "under_5_5", "Under 5.5", freqs.get("under_5_5", 0), odds["under_5_5"], skip_set, dg_map, bankroll)
+
+    # Over/Under 6.5
+    if "over_6_5" in odds:
+        _add_market(markets, "over_6_5", "Over 6.5", freqs.get("over_6_5", 0), odds["over_6_5"], skip_set, dg_map, bankroll)
+    if "under_6_5" in odds:
+        _add_market(markets, "under_6_5", "Under 6.5", freqs.get("under_6_5", 0), odds["under_6_5"], skip_set, dg_map, bankroll)
+
+    # Puck line -1.5 (favourite) / +1.5 (underdog)
+    if "puck_line_fav" in odds:
+        # H2H: how often did the home team win by 2+?
+        pl_freq = sum(1 for r in h2h if r["home"] - r["away"] >= 2) / n if h2h else 0
+        _add_market(markets, "puck_line_fav", "Puck Line -1.5 (Home)", pl_freq, odds["puck_line_fav"], skip_set, dg_map, bankroll)
+    if "puck_line_dog" in odds:
+        pl_dog_freq = sum(1 for r in h2h if r["away"] - r["home"] >= 2 or r["home"] - r["away"] <= 1) / n if h2h else 0
+        _add_market(markets, "puck_line_dog", "Puck Line +1.5 (Away)", pl_dog_freq, odds["puck_line_dog"], skip_set, dg_map, bankroll)
+
+    # Both teams score
+    if "bts_yes" in odds:
+        _add_market(markets, "bts_yes", "Both Teams Score", freqs.get("bts_yes", 0), odds["bts_yes"], skip_set, dg_map, bankroll)
+
+    markets.sort(key=lambda x: x["ev"], reverse=True)
+    recs = [m for m in markets if m["rec"] in ("BET", "CONSIDER")][:2]
+
+    return {
+        "game":             f"{data['home_team']} vs {data['away_team']}",
+        "sport":            "nhl",
+        "competition":      "NHL",
+        "h2h_n":            freqs.get("n", 0),
+        "avg_total":        freqs.get("avg_total", 0),
+        "h2h_close_pct":    freqs.get("h2h_close_pct", 0),
+        "freqs":            freqs,
+        "warnings":         [i["msg"] for i in issues],
+        "markets":          markets,
+        "recs":             recs,
+        "bankroll":         bankroll,
+        "mode":             bankroll_mode(bankroll),
+        "total_exp":        sum(m["stake"] for m in recs),
+    }
+
+
 def _add_market(markets, key, label, freq, odds_val, skip_set, dg_map, bankroll):
     ev_val = calc_ev(freq, odds_val)
     raw_t  = ev_to_tier(ev_val)

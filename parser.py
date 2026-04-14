@@ -283,3 +283,116 @@ def _parse_nba_odds(line: str, odds: dict):
                     odds[key] = float(m.group(1))
             except (ValueError, IndexError):
                 pass
+
+
+# ── NHL ────────────────────────────────────────────────────────────────────────
+
+def parse_nhl(text: str) -> dict:
+    """
+    NHL input format:
+      Boston Bruins vs Toronto Maple Leafs
+      H2H: 3-2, 4-1, 2-3, 1-2, 3-1, 2-4
+      Home inj: Pastrnak, McAvoy
+      Away inj: Matthews, Marner
+      B2B: no                     ← home / away / both / no
+      Backup goalie: away         ← home / away / both / no
+      Playoffs: no
+      W1:1.95  W2:1.90
+      PL-1.5:3.80  PL+1.5:1.22   ← puck line
+      O5.5:1.85  U5.5:1.95
+      O6.5:2.10  U6.5:1.72
+      Bank: 90000
+    """
+    data = {
+        "sport": "nhl",
+        "home_team": "Home", "away_team": "Away",
+        "competition": "NHL",
+        "h2h": [],
+        "home_injuries": [], "away_injuries": [],
+        "context": {
+            "sport": "nhl",
+            "home_b2b": False, "away_b2b": False,
+            "home_backup_goalie": False, "away_backup_goalie": False,
+            "is_playoffs": False,
+        },
+        "odds": {},
+        "bankroll": 100_000,
+    }
+
+    lines = [l.strip() for l in text.strip().splitlines() if l.strip()]
+
+    for line in lines:
+        low = line.lower()
+
+        # Teams
+        if " vs " in low and not re.search(r"[\d.]{3,}", line):
+            parts = re.split(r"\s+vs\s+", line, flags=re.IGNORECASE, maxsplit=1)
+            if len(parts) == 2:
+                data["home_team"] = parts[0].strip().title()
+                data["away_team"] = parts[1].strip().title()
+            continue
+
+        if low.startswith("h2h"):
+            data["h2h"] = _parse_scores(_after_colon(line))
+            continue
+
+        if re.match(r"home\s*(inj|injur)", low):
+            data["home_injuries"] = [n.strip() for n in _after_colon(line).split(",") if n.strip()]
+            continue
+        if re.match(r"away\s*(inj|injur)", low):
+            data["away_injuries"] = [n.strip() for n in _after_colon(line).split(",") if n.strip()]
+            continue
+
+        if re.match(r"b2b|back.to.back", low):
+            val = _after_colon(line).lower()
+            data["context"]["home_b2b"] = "home" in val or "both" in val
+            data["context"]["away_b2b"] = "away" in val or "both" in val
+            continue
+
+        if re.match(r"backup\s*goalie|goalie", low):
+            val = _after_colon(line).lower()
+            is_no = val in ("no", "none", "false", "-")
+            data["context"]["home_backup_goalie"] = (not is_no) and ("home" in val or "both" in val)
+            data["context"]["away_backup_goalie"] = (not is_no) and ("away" in val or "both" in val)
+            continue
+
+        if re.match(r"playoff", low):
+            data["context"]["is_playoffs"] = _bool(_after_colon(line))
+            continue
+
+        if re.match(r"bank", low):
+            try:
+                data["bankroll"] = float(re.sub(r"[,_]", "", _after_colon(line)))
+            except ValueError:
+                pass
+            continue
+
+        _parse_nhl_odds(line, data["odds"])
+
+    data["context"]["h2h_count"] = len(data["h2h"])
+    return data
+
+
+def _parse_nhl_odds(line: str, odds: dict):
+    low = line.lower()
+    patterns = [
+        (r"w1\s*[:=]\s*([\d.]+)",            "w1"),
+        (r"w2\s*[:=]\s*([\d.]+)",            "w2"),
+        (r"pl-1\.5\s*[:=]\s*([\d.]+)",       "puck_line_fav"),   # PL-1.5:3.80
+        (r"pl\+1\.5\s*[:=]\s*([\d.]+)",      "puck_line_dog"),   # PL+1.5:1.22
+        (r"o5\.5\s*[:=]\s*([\d.]+)",         "over_5_5"),
+        (r"u5\.5\s*[:=]\s*([\d.]+)",         "under_5_5"),
+        (r"o6\.5\s*[:=]\s*([\d.]+)",         "over_6_5"),
+        (r"u6\.5\s*[:=]\s*([\d.]+)",         "under_6_5"),
+        (r"o7\.5\s*[:=]\s*([\d.]+)",         "over_7_5"),
+        (r"u7\.5\s*[:=]\s*([\d.]+)",         "under_7_5"),
+        (r"bts\+\s*[:=]\s*([\d.]+)",         "bts_yes"),
+        (r"bts-\s*[:=]\s*([\d.]+)",          "bts_no"),
+    ]
+    for pattern, key in patterns:
+        m = re.search(pattern, low)
+        if m:
+            try:
+                odds[key] = float(m.group(1))
+            except ValueError:
+                pass

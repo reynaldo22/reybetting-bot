@@ -302,10 +302,40 @@ async def _find_nba_team(name: str) -> Optional[dict]:
     return None
 
 
-async def _nba_team_schedule(team_id: str) -> list:
-    url = f"{ESPN_BASE}/basketball/nba/teams/{team_id}/schedule"
-    data = await _get(url)
-    return data.get("events", [])
+async def _nba_recent_games(days: int = 40) -> list:
+    """Fetch completed NBA games from last N days using scoreboard endpoint."""
+    from datetime import datetime, timedelta
+    games = []
+    end = datetime.utcnow()
+    async with httpx.AsyncClient(headers=HEADERS, timeout=10) as client:
+        for i in range(days):
+            d = end - timedelta(days=i)
+            date_str = d.strftime("%Y%m%d")
+            try:
+                r = await client.get(
+                    f"{ESPN_BASE}/basketball/nba/scoreboard",
+                    params={"dates": date_str}
+                )
+                events = r.json().get("events", [])
+                for e in events:
+                    comp = e.get("competitions", [{}])[0]
+                    if not comp.get("status", {}).get("type", {}).get("completed"):
+                        continue
+                    competitors = comp.get("competitors", [])
+                    if len(competitors) == 2:
+                        home = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+                        away = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+                        games.append({
+                            "home_id":    home.get("team", {}).get("id", ""),
+                            "home_name":  home.get("team", {}).get("displayName", ""),
+                            "home_score": int(home.get("score", 0) or 0),
+                            "away_id":    away.get("team", {}).get("id", ""),
+                            "away_name":  away.get("team", {}).get("displayName", ""),
+                            "away_score": int(away.get("score", 0) or 0),
+                        })
+            except Exception:
+                continue
+    return games
 
 
 async def _nba_injuries() -> dict:
@@ -326,44 +356,28 @@ async def _nba_injuries() -> dict:
         return {}
 
 
-def _nba_h2h(events: list, team_a_id: str, team_b_id: str) -> list:
+def _nba_h2h_from_games(games: list, id_a: str, id_b: str) -> list:
     h2h = []
-    for ev in reversed(events):
-        comp = ev.get("competitions", [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed", False):
-            continue
-        competitors = comp.get("competitors", [])
-        ids = {c.get("team", {}).get("id", "") for c in competitors}
-        if str(team_a_id) not in ids or str(team_b_id) not in ids:
-            continue
-        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
-        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
-        if home and away:
-            h2h.append((_get_score(home), _get_score(away)))
+    for g in games:
+        if (str(g["home_id"]) == str(id_a) and str(g["away_id"]) == str(id_b)):
+            h2h.append((g["home_score"], g["away_score"]))
+        elif (str(g["home_id"]) == str(id_b) and str(g["away_id"]) == str(id_a)):
+            # flip to always show id_a as "home"
+            h2h.append((g["away_score"], g["home_score"]))
         if len(h2h) >= 6:
             break
     return h2h
 
 
-async def _nba_form(events: list, team_id: str, n: int = 5) -> list:
+def _nba_form_from_games(games: list, team_id: str, n: int = 5) -> list:
     results = []
-    for ev in reversed(events):
+    for g in games:
         if len(results) >= n:
             break
-        comp = ev.get("competitions", [{}])[0]
-        if not comp.get("status", {}).get("type", {}).get("completed", False):
-            continue
-        competitors = comp.get("competitors", [])
-        home = next((c for c in competitors if c.get("homeAway") == "home"), None)
-        away = next((c for c in competitors if c.get("homeAway") == "away"), None)
-        if not home or not away:
-            continue
-        h, a = _get_score(home), _get_score(away)
-        home_id = home.get("team", {}).get("id", "")
-        if str(home_id) == str(team_id):
-            results.append((h, a))
-        else:
-            results.append((a, h))
+        if str(g["home_id"]) == str(team_id):
+            results.append((g["home_score"], g["away_score"]))
+        elif str(g["away_id"]) == str(team_id):
+            results.append((g["away_score"], g["home_score"]))
     return results
 
 
@@ -382,15 +396,15 @@ async def fetch_nba(home_name: str, away_name: str) -> str:
         home_id = home_team["id"]
         away_id = away_team["id"]
 
-        home_sched, away_sched, all_injuries = await asyncio.gather(
-            _nba_team_schedule(home_id),
-            _nba_team_schedule(away_id),
+        # Use scoreboard date-range approach (works year-round, including playoffs)
+        all_games, all_injuries = await asyncio.gather(
+            _nba_recent_games(days=60),
             _nba_injuries(),
         )
 
-        h2h       = _nba_h2h(home_sched, home_id, away_id)
-        home_form = await _nba_form(home_sched, home_id, 5)
-        away_form = await _nba_form(away_sched, away_id, 5)
+        h2h       = _nba_h2h_from_games(all_games, home_id, away_id)
+        home_form = _nba_form_from_games(all_games, home_id, 5)
+        away_form = _nba_form_from_games(all_games, away_id, 5)
 
         home_inj = all_injuries.get(str(home_id), [])[:5]
         away_inj = all_injuries.get(str(away_id), [])[:5]
@@ -428,39 +442,235 @@ async def fetch_nba(home_name: str, away_name: str) -> str:
     )
 
 
+# ── NHL fetcher ────────────────────────────────────────────────────────────────
+
+NHL_BASE = "https://api-web.nhle.com/v1"
+
+NHL_TEAMS: dict = {}  # cache: abbrev → {abbrev, name}
+
+# Common name → abbreviation map
+NHL_NAME_MAP = {
+    "bruins": "BOS", "boston": "BOS",
+    "maple leafs": "TOR", "toronto": "TOR", "leafs": "TOR",
+    "rangers": "NYR", "new york rangers": "NYR",
+    "islanders": "NYI", "new york islanders": "NYI",
+    "devils": "NJD", "new jersey": "NJD",
+    "flyers": "PHI", "philadelphia": "PHI",
+    "penguins": "PIT", "pittsburgh": "PIT",
+    "capitals": "WSH", "washington": "WSH",
+    "hurricanes": "CAR", "carolina": "CAR",
+    "lightning": "TBL", "tampa bay": "TBL", "tampa": "TBL",
+    "panthers": "FLA", "florida": "FLA",
+    "canadiens": "MTL", "montreal": "MTL",
+    "senators": "OTT", "ottawa": "OTT",
+    "sabres": "BUF", "buffalo": "BUF",
+    "red wings": "DET", "detroit": "DET",
+    "blackhawks": "CHI", "chicago": "CHI",
+    "predators": "NSH", "nashville": "NSH",
+    "blues": "STL", "st louis": "STL", "st. louis": "STL",
+    "avalanche": "COL", "colorado": "COL",
+    "jets": "WPG", "winnipeg": "WPG",
+    "wild": "MIN", "minnesota": "MIN",
+    "stars": "DAL", "dallas": "DAL",
+    "oilers": "EDM", "edmonton": "EDM",
+    "flames": "CGY", "calgary": "CGY",
+    "canucks": "VAN", "vancouver": "VAN",
+    "golden knights": "VGK", "vegas": "VGK",
+    "kraken": "SEA", "seattle": "SEA",
+    "sharks": "SJS", "san jose": "SJS",
+    "ducks": "ANA", "anaheim": "ANA",
+    "kings": "LAK", "los angeles kings": "LAK",
+    "coyotes": "UTA", "utah": "UTA", "arizona": "UTA",
+    "blue jackets": "CBJ", "columbus": "CBJ",
+}
+
+
+async def _nhl_get(path: str) -> dict:
+    url = f"{NHL_BASE}{path}"
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=10,
+        follow_redirects=True
+    ) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.json()
+
+
+def _find_nhl_abbrev(name: str) -> Optional[str]:
+    low = _normalize(name)
+    # Direct map
+    if low in NHL_NAME_MAP:
+        return NHL_NAME_MAP[low]
+    # Partial match
+    for key, abbrev in NHL_NAME_MAP.items():
+        if key in low or low in key:
+            return abbrev
+    # Try 3-letter abbrev
+    if len(name) == 3:
+        return name.upper()
+    return None
+
+
+async def _nhl_team_schedule(abbrev: str) -> list:
+    data = await _nhl_get(f"/club-schedule-season/{abbrev}/now")
+    return [g for g in data.get("games", []) if g.get("gameState") == "OFF"]
+
+
+async def _nhl_roster_goalies(abbrev: str) -> list:
+    data = await _nhl_get(f"/roster/{abbrev}/current")
+    goalies = data.get("goalies", [])
+    return [f"{g['firstName']['default']} {g['lastName']['default']}" for g in goalies]
+
+
+def _nhl_h2h(games: list, home_abbrev: str, away_abbrev: str) -> list:
+    h2h = []
+    for g in reversed(games):
+        h = g.get("homeTeam", {})
+        a = g.get("awayTeam", {})
+        if h.get("abbrev") == home_abbrev and a.get("abbrev") == away_abbrev:
+            h2h.append((h.get("score", 0), a.get("score", 0)))
+        elif h.get("abbrev") == away_abbrev and a.get("abbrev") == home_abbrev:
+            # Flip so always home-away from perspective of our home team
+            h2h.append((a.get("score", 0), h.get("score", 0)))
+        if len(h2h) >= 6:
+            break
+    return h2h
+
+
+def _nhl_form(games: list, abbrev: str, n: int = 5) -> list:
+    results = []
+    for g in reversed(games):
+        if len(results) >= n:
+            break
+        h = g.get("homeTeam", {})
+        a = g.get("awayTeam", {})
+        if h.get("abbrev") == abbrev:
+            results.append((h.get("score", 0), a.get("score", 0)))
+        elif a.get("abbrev") == abbrev:
+            results.append((a.get("score", 0), h.get("score", 0)))
+    return results
+
+
+async def fetch_nhl(home_name: str, away_name: str) -> str:
+    home_abbrev = _find_nhl_abbrev(home_name)
+    away_abbrev = _find_nhl_abbrev(away_name)
+
+    if not home_abbrev:
+        return f"❌ Could not find NHL team '{home_name}'. Try full name (e.g. 'Boston Bruins')."
+    if not away_abbrev:
+        return f"❌ Could not find NHL team '{away_name}'. Try full name (e.g. 'Toronto Maple Leafs')."
+
+    try:
+        home_sched, away_sched, home_goalies, away_goalies = await asyncio.gather(
+            _nhl_team_schedule(home_abbrev),
+            _nhl_team_schedule(away_abbrev),
+            _nhl_roster_goalies(home_abbrev),
+            _nhl_roster_goalies(away_abbrev),
+        )
+
+        h2h       = _nhl_h2h(home_sched, home_abbrev, away_abbrev)
+        if len(h2h) < 3:
+            h2h2 = _nhl_h2h(away_sched, away_abbrev, home_abbrev)
+            h2h += [(b, a) for a, b in h2h2 if (b, a) not in h2h]
+            h2h = h2h[:6]
+
+        home_form = _nhl_form(home_sched, home_abbrev, 5)
+        away_form = _nhl_form(away_sched, away_abbrev, 5)
+
+    except Exception as e:
+        return f"❌ NHL fetch error: {e}"
+
+    h2h_str = ", ".join(f"{h}-{a}" for h, a in h2h) if h2h else "N/A"
+
+    def form_str(form):
+        return " | ".join(f"{h}-{a}" for h, a in form) if form else "N/A"
+
+    home_g_str = ", ".join(home_goalies) if home_goalies else "unknown"
+    away_g_str = ", ".join(away_goalies) if away_goalies else "unknown"
+
+    # Get team display names from standings
+    try:
+        standings = await _nhl_get("/standings/now")
+        name_map = {
+            t.get("teamAbbrev", {}).get("default", ""): t.get("teamName", {}).get("default", "")
+            for t in standings.get("standings", [])
+        }
+        home_display = name_map.get(home_abbrev, home_abbrev)
+        away_display = name_map.get(away_abbrev, away_abbrev)
+    except Exception:
+        home_display = home_abbrev
+        away_display = away_abbrev
+
+    return (
+        f"✅ *Data fetched! Add odds then copy & send /nhl*\n\n"
+        f"📋 *Recent form:*\n"
+        f"  {home_display}: `{form_str(home_form)}`\n"
+        f"  {away_display}: `{form_str(away_form)}`\n\n"
+        f"🥅 *Goalies on roster:*\n"
+        f"  Home: {home_g_str}\n"
+        f"  Away: {away_g_str}\n\n"
+        f"```\n"
+        f"/nhl\n"
+        f"{home_display} vs {away_display}\n"
+        f"H2H: {h2h_str}\n"
+        f"Home inj: [CHECK & ADD MANUALLY]\n"
+        f"Away inj: [CHECK & ADD MANUALLY]\n"
+        f"B2B: no\n"
+        f"Backup goalie: no\n"
+        f"Playoffs: no\n"
+        f"\n"
+        f"[PASTE ODDS BELOW]\n"
+        f"W1:  W2:\n"
+        f"PL-1.5:  PL+1.5:\n"
+        f"O5.5:  U5.5:\n"
+        f"O6.5:  U6.5:\n"
+        f"Bank: [your bankroll]\n"
+        f"```"
+    )
+
+
 # ── Main dispatcher ───────────────────────────────────────────────────────────
 
 async def fetch_match(query: str) -> str:
-    """
-    Parse '/fetch Arsenal vs Bournemouth EPL' or '/fetch Lakers vs Warriors NBA'
-    """
     query = query.strip()
+    low   = query.lower()
 
     # Detect sport
-    is_nba = "nba" in query.lower() or any(
-        w in query.lower() for w in ["lakers","warriors","celtics","knicks",
-                                      "bulls","heat","nets","spurs","suns",
-                                      "thunder","clippers","rockets","mavs",
-                                      "mavericks","nuggets","jazz","kings"]
-    )
+    is_nhl = "nhl" in low or any(w in low for w in [
+        "bruins","maple leafs","leafs","rangers","islanders","devils","flyers",
+        "penguins","capitals","hurricanes","lightning","panthers","canadiens",
+        "senators","sabres","red wings","blackhawks","predators","blues",
+        "avalanche","jets","wild","stars","oilers","flames","canucks",
+        "golden knights","kraken","sharks","ducks","kings","coyotes","blue jackets"
+    ])
+    is_nba = not is_nhl and ("nba" in low or any(w in low for w in [
+        "lakers","warriors","celtics","knicks","bulls","heat","nets","spurs",
+        "suns","thunder","clippers","rockets","mavs","mavericks","nuggets","jazz"
+    ]))
 
-    # Extract teams (everything before the league/sport keyword)
-    vs_match = re.search(r"(.+?)\s+vs\.?\s+(.+?)(?:\s+(nba|epl|la liga|serie a|bundesliga|ligue 1|ucl|champions|premier|spain|italy|germany|france|england|eredivisie).*)?$", query, re.IGNORECASE)
+    vs_match = re.search(
+        r"(.+?)\s+vs\.?\s+(.+?)(?:\s+(nhl|nba|epl|la liga|serie a|bundesliga|ligue 1|ucl|champions|premier|spain|italy|germany|france|england|eredivisie).*)?$",
+        query, re.IGNORECASE
+    )
 
     if not vs_match:
         return (
             "❌ Format not recognized. Use:\n"
             "`/fetch Arsenal vs Bournemouth EPL`\n"
-            "`/fetch Lakers vs Warriors NBA`"
+            "`/fetch Lakers vs Warriors NBA`\n"
+            "`/fetch Bruins vs Maple Leafs NHL`"
         )
 
     home_name = vs_match.group(1).strip()
     away_name = vs_match.group(2).strip()
     league    = (vs_match.group(3) or "").strip()
 
-    if is_nba:
+    if is_nhl:
+        return await fetch_nhl(home_name, away_name)
+    elif is_nba:
         return await fetch_nba(home_name, away_name)
     else:
         if not league:
-            league = "EPL"  # default
+            league = "EPL"
         return await fetch_soccer(home_name, away_name, league)

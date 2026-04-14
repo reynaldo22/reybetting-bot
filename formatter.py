@@ -48,6 +48,20 @@ def format_result(result: dict) -> str:
             f"Avg Total: {f.get('avg_total',0)}",
             "```", "",
         ]
+    elif sport == "nhl" and n:
+        close_pct = result.get("h2h_close_pct", 0)
+        lines += [
+            "*📊 H2H FREQUENCIES*",
+            "```",
+            f"Home Win  : {f['w1']*100:>4.0f}%  ({round(f['w1']*n)}/{n})",
+            f"Away Win  : {f['w2']*100:>4.0f}%  ({round(f['w2']*n)}/{n})",
+            f"Over 5.5  : {f.get('over_5_5',0)*100:>4.0f}%  ({round(f.get('over_5_5',0)*n)}/{n})",
+            f"Over 6.5  : {f.get('over_6_5',0)*100:>4.0f}%  ({round(f.get('over_6_5',0)*n)}/{n})",
+            f"BTS Yes   : {f.get('bts_yes',0)*100:>4.0f}%  ({round(f.get('bts_yes',0)*n)}/{n})",
+            f"Close (≤1): {close_pct*100:>4.0f}%  (OT/SO risk indicator)",
+            f"Avg Goals : {f.get('avg_total',0)}",
+            "```", "",
+        ]
 
     # ── Markets table ─────────────────────────────────────────────────────────
     markets = result["markets"]
@@ -102,11 +116,13 @@ def format_result(result: dict) -> str:
 
 def format_help() -> str:
     return """
-⚽🏀 *BETTING ANALYZER BOT*
+⚽🏀🏒 *BETTING ANALYZER BOT*
 
 *Commands:*
 `/soccer` — Analyze a soccer match
 `/nba`    — Analyze an NBA game
+`/nhl`    — Analyze an NHL game
+`/fetch`  — Auto-fetch match data (soccer/NBA/NHL)
 `/status` — Show bankroll & daily limits
 `/setbank 101000` — Update your bankroll
 `/log`    — View recent P&L log
@@ -144,10 +160,34 @@ HC1-5.5:1.95  HC2+5.5:1.87
 Bank: 101000
 ```
 
-*Context flags:*
+*NHL input format:*
+```
+/nhl
+Boston Bruins vs Toronto Maple Leafs
+H2H: 3-2, 4-1, 2-3, 1-2, 3-1, 2-4
+Home inj: Pastrnak, McAvoy
+Away inj: Matthews, Marner
+B2B: no
+Backup goalie: away
+Playoffs: no
+W1:1.95  W2:1.90
+PL-1.5:3.80  PL+1.5:1.22
+O5.5:1.85  U5.5:1.95
+O6.5:2.10  U6.5:1.72
+Bank: 90000
+```
+
+*Fetch command:*
+`/fetch Arsenal vs Bournemouth EPL`
+`/fetch Lakers vs Warriors NBA`
+`/fetch Bruins vs Maple Leafs NHL`
+
+*Soccer context flags:*
 • `Relegation: home/away/both/none`
 • `UCL: no/knockout/first-leg`
-• `Fwd: home/away/both/none` (missing forwards)
-• `Def missing: home/away/both` (defensive absence)
+• `Fwd: home/away/both/none`
+• `Def missing: home/away/both`
 • `Last day: yes/no` (NBA end of season)
+• `B2B: home/away/both/no` (NHL back-to-back)
+• `Backup goalie: home/away/both/no` (NHL)
 """.strip()

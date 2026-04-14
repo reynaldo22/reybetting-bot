@@ -172,4 +172,65 @@ def check_rules(ctx: dict) -> list:
                 "skip": [], "downgrade": {"under": 1}
             })
 
+    # ── NHL-SPECIFIC RULES ───────────────────────────────────────────────────
+    if sport == "nhl":
+
+        # NHL Rule 1 — Puck line OT risk
+        # ~22% of NHL regular season games go to OT
+        # Close matchups → puck line -1.5 is very risky
+        h2h_close = ctx.get("h2h_close_pct", 0)  # % of H2H games within 1 goal
+        if h2h_close >= 0.5:
+            issues.append({
+                "rule": 101, "level": "WARNING",
+                "msg": (f"⚠️ NHL RULE: {h2h_close*100:.0f}% of H2H games decided by 1 goal.\n"
+                        "   Puck line -1.5 is HIGH RISK — OT/shootout ends it at 1 goal.\n"
+                        "   → Downgrade puck_line_fav 2 tiers, use ML instead."),
+                "skip": [], "downgrade": {"puck_line_fav": 2}
+            })
+
+        # NHL Rule 2 — Back-to-back fatigue
+        if ctx.get("home_b2b") or ctx.get("away_b2b"):
+            team = "Home" if ctx.get("home_b2b") else "Away"
+            issues.append({
+                "rule": 102, "level": "WARNING",
+                "msg": (f"⚠️ NHL RULE: {team} team on BACK-TO-BACK.\n"
+                        "   Fatigue → lower scoring, goalie not at full strength.\n"
+                        "   → Downgrade Over and puck line for tired team."),
+                "skip": [],
+                "downgrade": {"over": 1, "puck_line_fav": 1}
+            })
+
+        # NHL Rule 3 — Backup goalie = higher scoring
+        if ctx.get("home_backup_goalie") or ctx.get("away_backup_goalie"):
+            team = "Home" if ctx.get("home_backup_goalie") else "Away"
+            issues.append({
+                "rule": 103, "level": "INFO",
+                "msg": (f"ℹ️ NHL RULE: {team} team starting BACKUP GOALIE.\n"
+                        "   Backup goalies allow ~0.5 more goals per game on average.\n"
+                        "   → Upgrade Over, downgrade Under by 1 tier."),
+                "skip": [],
+                "downgrade": {"under": 1}
+            })
+
+        # NHL Rule 4 — Playoffs: no shootout, full OT periods
+        if ctx.get("is_playoffs"):
+            issues.append({
+                "rule": 104, "level": "INFO",
+                "msg": ("ℹ️ NHL RULE: PLAYOFFS format — no shootout, full 20-min OT periods.\n"
+                        "   Games can go very long. Puck line still valid but OT risk is higher.\n"
+                        "   → Moneyline preferred over puck line in playoff games."),
+                "skip": [],
+                "downgrade": {"puck_line_fav": 1}
+            })
+
+        # NHL Rule 5 — H2H sample (same as general but with hockey-specific keys)
+        # Already handled by general Rule 15 above, but extend to hockey markets
+        if ctx.get("h2h_count", 10) < 5:
+            issues.append({
+                "rule": 115, "level": "WARNING",
+                "msg": f"⚠️ NHL RULE 15: Only {ctx.get('h2h_count',0)} H2H games — downgrade puck line & totals.",
+                "skip": [],
+                "downgrade": {"puck_line_fav": 1, "over": 1, "under": 1}
+            })
+
     return issues

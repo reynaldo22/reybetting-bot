@@ -25,8 +25,8 @@ except ImportError:
 from dotenv import load_dotenv
 load_dotenv()
 
-from parser    import parse_soccer, parse_nba
-from analyzer  import analyze_soccer, analyze_nba
+from parser    import parse_soccer, parse_nba, parse_nhl
+from analyzer  import analyze_soccer, analyze_nba, analyze_nhl
 from formatter import format_result, format_help
 from db        import get_bankroll, set_bankroll, log_bet, recent_bets, format_log
 from ev_calc   import bankroll_mode
@@ -246,6 +246,36 @@ async def cmd_log(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── /fetch ────────────────────────────────────────────────────────────────────
 
+async def cmd_nhl(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await auth(update): return
+
+    full_text = update.message.text or ""
+    body = full_text[full_text.find("\n"):].strip() if "\n" in full_text else ""
+    if not body:
+        parts = full_text.split(None, 1)
+        body  = parts[1].strip() if len(parts) > 1 else ""
+
+    if not body or len(body) < 5:
+        await update.message.reply_text(
+            "Send match data after /nhl\n\n" + format_help(),
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
+    msg = await update.message.reply_text("⏳ Analyzing NHL game...")
+
+    try:
+        if "bank" not in body.lower():
+            body += f"\nBank: {get_bankroll()}"
+
+        data   = parse_nhl(body)
+        result = analyze_nhl(data)
+        text   = format_result(result)
+        await msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await msg.edit_text(f"❌ Error: {e}\n\nCheck your input format. Use /help for the template.")
+
+
 async def cmd_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Auto-fetch match data from ESPN.
@@ -340,6 +370,7 @@ def main():
     app.add_handler(CommandHandler("setbank", cmd_setbank))
     app.add_handler(CommandHandler("logbet",  cmd_logbet))
     app.add_handler(CommandHandler("log",     cmd_log))
+    app.add_handler(CommandHandler("nhl",     cmd_nhl))
     app.add_handler(CommandHandler("fetch",   cmd_fetch))
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
