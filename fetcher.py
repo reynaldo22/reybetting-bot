@@ -330,7 +330,7 @@ async def _find_nba_team(name: str) -> Optional[dict]:
     return None
 
 
-async def _nba_recent_games(days: int = 40) -> list:
+async def _nba_recent_games(days: int = 120) -> list:
     """Fetch completed NBA games from last N days using scoreboard endpoint."""
     from datetime import datetime, timedelta
     games = []
@@ -541,8 +541,17 @@ def _find_nhl_abbrev(name: str) -> Optional[str]:
 
 
 async def _nhl_team_schedule(abbrev: str) -> list:
-    data = await _nhl_get(f"/club-schedule-season/{abbrev}/now")
-    return [g for g in data.get("games", []) if g.get("gameState") == "OFF"]
+    """Fetch completed games from current + previous 2 NHL seasons."""
+    all_games = []
+    # current season + 2 previous seasons for H2H coverage
+    for season in ["now", "20242025", "20232024"]:
+        try:
+            data = await _nhl_get(f"/club-schedule-season/{abbrev}/{season}")
+            games = [g for g in data.get("games", []) if g.get("gameState") == "OFF"]
+            all_games.extend(games)
+        except Exception:
+            continue
+    return all_games
 
 
 async def _nhl_roster_goalies(abbrev: str) -> list:
