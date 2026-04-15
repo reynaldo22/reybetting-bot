@@ -21,6 +21,8 @@ def _soccer_freqs(h2h: list) -> dict:
     o15     = sum(1 for r in h2h if r["home"] + r["away"] > 1.5)
     o25     = sum(1 for r in h2h if r["home"] + r["away"] > 2.5)
     o35     = sum(1 for r in h2h if r["home"] + r["away"] > 3.5)
+    o45     = sum(1 for r in h2h if r["home"] + r["away"] > 4.5)
+    o55     = sum(1 for r in h2h if r["home"] + r["away"] > 5.5)
     avg_g   = sum(r["home"] + r["away"] for r in h2h) / n
 
     return {
@@ -36,6 +38,10 @@ def _soccer_freqs(h2h: list) -> dict:
         "under_2_5": round((n - o25) / n, 3),
         "over_3_5":  round(o35    / n, 3),
         "under_3_5": round((n - o35) / n, 3),
+        "over_4_5":  round(o45    / n, 3),
+        "under_4_5": round((n - o45) / n, 3),
+        "over_5_5":  round(o55    / n, 3),
+        "under_5_5": round((n - o55) / n, 3),
     }
 
 
@@ -72,6 +78,10 @@ SOCCER_MARKETS = [
     ("under_2_5", "Under 2.5"),
     ("over_3_5",  "Over 3.5"),
     ("under_3_5", "Under 3.5"),
+    ("over_4_5",  "Over 4.5"),
+    ("under_4_5", "Under 4.5"),
+    ("over_5_5",  "Over 5.5"),
+    ("under_5_5", "Under 5.5"),
 ]
 
 
