@@ -102,18 +102,46 @@ async def _soccer_teams(league_code: str) -> list:
 
 
 async def _find_soccer_team(name: str, league_code: str) -> Optional[dict]:
-    # Apply alias first
-    resolved = SOCCER_ALIASES.get(name.lower().strip(), name)
-    teams = await _soccer_teams(league_code)
+    resolved  = SOCCER_ALIASES.get(name.lower().strip(), name)
+    r_norm    = _normalize(resolved)
+    n_norm    = _normalize(name)
+    teams     = await _soccer_teams(league_code)
+
+    best_team  = None
+    best_score = 0
+
     for t in teams:
-        team = t.get("team", {})
-        if _team_match(resolved, team.get("displayName", "")) or \
-           _team_match(resolved, team.get("shortDisplayName", "")) or \
-           _team_match(resolved, team.get("name", "")) or \
-           _team_match(name, team.get("displayName", "")) or \
-           _team_match(name, team.get("shortDisplayName", "")):
-            return team
-    return None
+        team     = t.get("team", {})
+        display  = _normalize(team.get("displayName", ""))
+        short    = _normalize(team.get("shortDisplayName", ""))
+        tname    = _normalize(team.get("name", ""))
+
+        score = 0
+        # Exact match — highest priority
+        if r_norm == display or n_norm == display:
+            score = 100
+        elif r_norm == short or n_norm == short:
+            score = 90
+        # One fully contains the other
+        elif r_norm in display or display in r_norm:
+            score = 60
+        elif n_norm in display or display in n_norm:
+            score = 55
+        else:
+            # ALL query words must appear in candidate (strict word match)
+            q_words = [w for w in r_norm.split() if len(w) > 3]
+            if q_words and all(w in display for w in q_words):
+                score = 40
+            else:
+                n_words = [w for w in n_norm.split() if len(w) > 3]
+                if n_words and all(w in display for w in n_words):
+                    score = 35
+
+        if score > best_score:
+            best_score = score
+            best_team  = team
+
+    return best_team if best_score > 0 else None
 
 
 async def _soccer_team_schedule(team_id: str, league_code: str) -> list:

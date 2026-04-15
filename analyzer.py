@@ -130,6 +130,9 @@ def analyze_soccer(data: dict) -> dict:
     # Rule 22 — top 2 non-skip recs
     recs = [m for m in markets if m["rec"] in ("BET", "CONSIDER")][:2]
 
+    home_inj = data.get("home_injuries", [])
+    away_inj = data.get("away_injuries", [])
+
     return {
         "game":        f"{data['home_team']} vs {data['away_team']}",
         "sport":       "soccer",
@@ -143,6 +146,10 @@ def analyze_soccer(data: dict) -> dict:
         "bankroll":    bankroll,
         "mode":        bankroll_mode(bankroll),
         "total_exp":   sum(m["stake"] for m in recs),
+        "home_injuries": home_inj,
+        "away_injuries": away_inj,
+        "home_team":   data["home_team"],
+        "away_team":   data["away_team"],
     }
 
 
@@ -198,18 +205,22 @@ def analyze_nba(data: dict) -> dict:
     recs = [m for m in markets if m["rec"] in ("BET","CONSIDER")][:2]
 
     return {
-        "game":        f"{data['home_team']} vs {data['away_team']}",
-        "sport":       "nba",
-        "competition": "NBA",
-        "h2h_n":       freqs.get("n", 0),
-        "avg_total":   freqs.get("avg_total", 0),
-        "freqs":       freqs,
-        "warnings":    [i["msg"] for i in issues],
-        "markets":     markets,
-        "recs":        recs,
-        "bankroll":    bankroll,
-        "mode":        bankroll_mode(bankroll),
-        "total_exp":   sum(m["stake"] for m in recs),
+        "game":          f"{data['home_team']} vs {data['away_team']}",
+        "sport":         "nba",
+        "competition":   "NBA",
+        "h2h_n":         freqs.get("n", 0),
+        "avg_total":     freqs.get("avg_total", 0),
+        "freqs":         freqs,
+        "warnings":      [i["msg"] for i in issues],
+        "markets":       markets,
+        "recs":          recs,
+        "bankroll":      bankroll,
+        "mode":          bankroll_mode(bankroll),
+        "total_exp":     sum(m["stake"] for m in recs),
+        "home_injuries": data.get("home_injuries", []),
+        "away_injuries": data.get("away_injuries", []),
+        "home_team":     data["home_team"],
+        "away_team":     data["away_team"],
     }
 
 
@@ -318,6 +329,10 @@ def analyze_nhl(data: dict) -> dict:
         "bankroll":         bankroll,
         "mode":             bankroll_mode(bankroll),
         "total_exp":        sum(m["stake"] for m in recs),
+        "home_injuries":    data.get("home_injuries", []),
+        "away_injuries":    data.get("away_injuries", []),
+        "home_team":        data["home_team"],
+        "away_team":        data["away_team"],
     }
 
 

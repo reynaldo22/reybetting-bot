@@ -16,6 +16,23 @@ def format_result(result: dict) -> str:
         "",
     ]
 
+    # ── Injuries ──────────────────────────────────────────────────────────────
+    home_inj = result.get("home_injuries", [])
+    away_inj = result.get("away_injuries", [])
+    if home_inj or away_inj:
+        lines.append("*🚑 INJURIES*")
+        if home_inj:
+            lines.append(f"  Home: {', '.join(home_inj)}")
+        if away_inj:
+            lines.append(f"  Away: {', '.join(away_inj)}")
+        # Flag if more than 3 key players missing
+        total_missing = len(home_inj) + len(away_inj)
+        if len(home_inj) >= 4:
+            lines.append(f"  ⚠️ Home missing {len(home_inj)} players — significant weakness")
+        if len(away_inj) >= 4:
+            lines.append(f"  ⚠️ Away missing {len(away_inj)} players — significant weakness")
+        lines.append("")
+
     # ── Warnings ──────────────────────────────────────────────────────────────
     if result["warnings"]:
         lines.append("*⚠️ RULE WARNINGS*")
