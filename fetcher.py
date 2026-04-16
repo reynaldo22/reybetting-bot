@@ -22,14 +22,24 @@ SOCCER_LEAGUES = {
     "bundesliga": "ger.1", "germany": "ger.1",
     "ligue 1": "fra.1", "ligue1": "fra.1", "france": "fra.1",
     "ucl": "uefa.champions", "champions": "uefa.champions",
-    "champions league": "uefa.champions", "uefa": "uefa.champions",
+    "champions league": "uefa.champions",
+    "uel": "uefa.europa", "europa": "uefa.europa",
+    "europa league": "uefa.europa", "europa league": "uefa.europa",
+    "uecl": "uefa.conference", "conference": "uefa.conference",
+    "conference league": "uefa.conference",
     "eredivisie": "ned.1", "netherlands": "ned.1",
 }
 
-UCL_CODES = {"uefa.champions"}
+UCL_CODES = {"uefa.champions", "uefa.europa", "uefa.conference"}
 
 # Common team name aliases for search
 SOCCER_ALIASES = {
+    "celta": "celta vigo", "celta vigo": "celta vigo",
+    "freiburg": "sc freiburg", "sc freiburg": "sc freiburg",
+    "frankfurt": "eintracht frankfurt", "eintracht": "eintracht frankfurt",
+    "rangers": "rangers fc", "celtic": "celtic fc",
+    "sporting": "sporting cp", "sporting cp": "sporting cp",
+    "braga": "sc braga", "porto": "fc porto",
     "psg": "paris saint-germain", "paris": "paris saint-germain",
     "atletico": "atletico madrid", "atletico madrid": "atletico madrid",
     "man utd": "manchester united", "man united": "manchester united",
@@ -269,8 +279,13 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
     def form_str(form):
         return " | ".join(f"{h}-{a}" for h, a, _ in form) if form else "N/A"
 
-    is_ucl  = league_code in UCL_CODES
+    is_ucl  = league_code == "uefa.champions"
+    is_euro = league_code in ("uefa.europa", "uefa.conference")
     ucl_str = "knockout" if is_ucl else "no"
+    league_disp = ("UCL" if is_ucl else
+                   "Europa League" if league_code == "uefa.europa" else
+                   "Conference League" if league_code == "uefa.conference" else
+                   league_disp)
 
     return (
         f"✅ *Data fetched! Add odds then copy & send /soccer*\n\n"
@@ -687,7 +702,7 @@ async def fetch_match(query: str) -> str:
     ]))
 
     vs_match = re.search(
-        r"(.+?)\s+vs\.?\s+(.+?)(?:\s+(nhl|nba|epl|la liga|serie a|bundesliga|ligue 1|ucl|champions|premier|spain|italy|germany|france|england|eredivisie).*)?$",
+        r"(.+?)\s+vs\.?\s+(.+?)(?:\s+(nhl|nba|epl|la liga|serie a|bundesliga|ligue 1|ucl|uel|uecl|champions|europa|conference|premier|spain|italy|germany|france|england|eredivisie).*)?$",
         query, re.IGNORECASE
     )
 
