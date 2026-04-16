@@ -32,6 +32,23 @@ SOCCER_LEAGUES = {
 
 UCL_CODES = {"uefa.champions", "uefa.europa", "uefa.conference"}
 
+# For teams in Conference League — ESPN has no UECL competition,
+# so we look them up via domestic league for form data
+TEAM_DOMESTIC_LEAGUE = {
+    "fiorentina": "ita.1",  "acf fiorentina": "ita.1",
+    "crystal palace": "eng.1",
+    "real betis": "esp.1",  "betis": "esp.1",
+    "gent": "ned.1",        "kaa gent": "ned.1",
+    "anderlecht": "bel.1",  "rsc anderlecht": "bel.1",
+    "djurgarden": "swe.1",  "djurgardens if": "swe.1",
+    "lask": "aut.1",        "lask linz": "aut.1",
+    "chelsea": "eng.1",     "man united": "eng.1",
+    "villarreal": "esp.1",  "villarreal cf": "esp.1",
+    "heidenheim": "ger.1",  "1. fc heidenheim": "ger.1",
+    "rapid vienna": "aut.1","sk rapid": "aut.1",
+    "jagiellonia": "pol.1",
+}
+
 # Common team name aliases for search
 SOCCER_ALIASES = {
     "celta": "celta vigo", "celta vigo": "celta vigo",
@@ -40,6 +57,14 @@ SOCCER_ALIASES = {
     "rangers": "rangers fc", "celtic": "celtic fc",
     "sporting": "sporting cp", "sporting cp": "sporting cp",
     "braga": "sc braga", "porto": "fc porto",
+    "fiorentina": "fiorentina", "acf fiorentina": "fiorentina",
+    "crystal palace": "crystal palace",
+    "betis": "real betis", "real betis": "real betis",
+    "villarreal": "villarreal cf",
+    "anderlecht": "rsc anderlecht",
+    "gent": "kaa gent", "kaa gent": "kaa gent",
+    "djurgarden": "djurgardens if",
+    "lask": "lask linz",
     "psg": "paris saint-germain", "paris": "paris saint-germain",
     "atletico": "atletico madrid", "atletico madrid": "atletico madrid",
     "man utd": "manchester united", "man united": "manchester united",
@@ -155,9 +180,20 @@ async def _find_soccer_team(name: str, league_code: str) -> Optional[dict]:
 
 
 async def _soccer_team_schedule(team_id: str, league_code: str) -> list:
+    """Fetch schedule — try current season first, then explicit 2026 season."""
     url = f"{ESPN_BASE}/soccer/{league_code}/teams/{team_id}/schedule"
     data = await _get(url)
     events = data.get("events", [])
+    # If no completed games, try with explicit season year
+    completed = [e for e in events if e.get("competitions", [{}])[0].get("status", {}).get("type", {}).get("completed")]
+    if not completed:
+        try:
+            data2 = await _get(url + "?season=2026")
+            events2 = data2.get("events", [])
+            if events2:
+                events = events2
+        except Exception:
+            pass
     return events
 
 
@@ -229,16 +265,68 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
     league_disp = league.upper()
 
     try:
-        # Find teams
-        home_team, away_team = await asyncio.gather(
-            _find_soccer_team(home_name, league_code),
-            _find_soccer_team(away_name, league_code),
+        # Find teams — if UEFA competition, try all three UEFA codes as fallback
+        uefa_fallback = ["uefa.champions", "uefa.europa", "uefa.conference"]
+
+        async def find_with_fallback(name: str) -> tuple:
+            """Returns (team, actual_league_code)"""
+            team = await _find_soccer_team(name, league_code)
+            if team:
+                return team, league_code
+            # Try other UEFA competitions
+            if league_code in uefa_fallback:
+                for code in uefa_fallback:
+                    if code == league_code:
+                        continue
+                    team = await _find_soccer_team(name, code)
+                    if team:
+                        return team, code
+            # Fallback: try domestic league (for Conference League teams)
+            resolved = SOCCER_ALIASES.get(name.lower().strip(), name).lower()
+            domestic = TEAM_DOMESTIC_LEAGUE.get(resolved) or TEAM_DOMESTIC_LEAGUE.get(name.lower().strip())
+            if domestic:
+                team = await _find_soccer_team(name, domestic)
+                if team:
+                    return team, domestic
+            return None, league_code
+
+        (home_team, home_lc), (away_team, away_lc) = await asyncio.gather(
+            find_with_fallback(home_name),
+            find_with_fallback(away_name),
         )
+        # Use whichever league code actually found both teams
+        if home_lc != league_code and home_team:
+            league_code = home_lc
+        elif away_lc != league_code and away_team:
+            league_code = away_lc
+
+        # Update display name based on actual league found
+        league_name_map = {
+            "uefa.champions": "UCL",
+            "uefa.europa": "Europa League",
+            "uefa.conference": "Conference League",
+        }
+        if league_code in league_name_map:
+            league_disp = league_name_map[league_code]
 
         if not home_team:
-            return f"❌ Could not find '{home_name}' in {league_disp}. Check team name."
+            return (f"❌ Could not find '{home_name}'.\n"
+                    f"Try full name e.g. 'Fiorentina', 'Crystal Palace'\n"
+                    f"Or specify competition: UCL / Europa / Conference")
         if not away_team:
-            return f"❌ Could not find '{away_name}' in {league_disp}. Check team name."
+            return (f"❌ Could not find '{away_name}'.\n"
+                    f"Try full name e.g. 'Fiorentina', 'Crystal Palace'\n"
+                    f"Or specify competition: UCL / Europa / Conference")
+
+        # Fix competition display if domestic fallback was used
+        if league_code not in ("uefa.champions", "uefa.europa", "uefa.conference"):
+            orig_key = league.lower().strip()
+            if orig_key in ("ucl", "champions", "champions league"):
+                league_disp = "UCL"
+            elif orig_key in ("uel", "europa", "europa league"):
+                league_disp = "Europa League"
+            elif orig_key in ("uecl", "conference", "conference league", "uefa"):
+                league_disp = "Conference League"
 
         home_id = home_team["id"]
         away_id = away_team["id"]
@@ -280,12 +368,7 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
         return " | ".join(f"{h}-{a}" for h, a, _ in form) if form else "N/A"
 
     is_ucl  = league_code == "uefa.champions"
-    is_euro = league_code in ("uefa.europa", "uefa.conference")
     ucl_str = "knockout" if is_ucl else "no"
-    league_disp = ("UCL" if is_ucl else
-                   "Europa League" if league_code == "uefa.europa" else
-                   "Conference League" if league_code == "uefa.conference" else
-                   league_disp)
 
     return (
         f"✅ *Data fetched! Add odds then copy & send /soccer*\n\n"
