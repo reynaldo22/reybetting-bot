@@ -121,14 +121,14 @@ def check_rules(ctx: dict) -> list:
             "rule": 15, "level": "CRITICAL",
             "msg": f"🚨 RULE 15: Only {h2h_n} H2H games — SKIP high-confidence bets. Max C-tier.",
             "skip": [],
-            "downgrade": {k: 2 for k in ["over_2_5","under_2_5","btts_yes","btts_no","w1","w2"]}
+            "downgrade": {k: 2 for k in ["over_2_5","under_2_5","over_3_5","under_3_5","over_4_5","under_4_5","btts_yes","btts_no","w1","w2","draw"]}
         })
     elif h2h_n < 5:
         issues.append({
             "rule": 15, "level": "WARNING",
             "msg": f"⚠️ RULE 15: Only {h2h_n} H2H games — low conviction. All markets downgraded 1 tier.",
             "skip": [],
-            "downgrade": {k: 1 for k in ["over_2_5","under_2_5","btts_yes","btts_no","w1","w2"]}
+            "downgrade": {k: 1 for k in ["over_2_5","under_2_5","over_3_5","under_3_5","over_4_5","under_4_5","btts_yes","btts_no","w1","w2","draw"]}
         })
 
     # ── NBA-SPECIFIC RULES ───────────────────────────────────────────────────
