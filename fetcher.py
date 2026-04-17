@@ -168,10 +168,16 @@ def _normalize(name: str) -> str:
 def _team_match(query: str, candidate: str) -> bool:
     q = _normalize(query)
     c = _normalize(candidate)
-    # exact or one contains the other
-    return q == c or q in c or c in q or any(
-        w in c for w in q.split() if len(w) > 3
-    )
+    if q == c:
+        return True
+    # Substring match only if candidate is substantial (>5 chars) to avoid "nets" in "hornets"
+    if len(q) > 5 and q in c:
+        return True
+    if len(c) > 5 and c in q:
+        return True
+    # Word-level: ALL query words (>4 chars) must appear in candidate
+    q_words = [w for w in q.split() if len(w) > 4]
+    return bool(q_words) and all(w in c for w in q_words)
 
 
 # ── Soccer fetcher ────────────────────────────────────────────────────────────
@@ -444,14 +450,37 @@ async def fetch_soccer(home_name: str, away_name: str, league: str) -> str:
 # ── NBA fetcher ───────────────────────────────────────────────────────────────
 
 NBA_TEAM_ALIASES = {
-    "la lakers": "los angeles lakers", "lal": "los angeles lakers",
-    "la clippers": "los angeles clippers", "lac": "los angeles clippers",
+    "la lakers": "los angeles lakers", "lal": "los angeles lakers", "lakers": "los angeles lakers",
+    "la clippers": "los angeles clippers", "lac": "los angeles clippers", "clippers": "los angeles clippers",
     "gsw": "golden state warriors", "warriors": "golden state warriors",
     "okc": "oklahoma city thunder", "thunder": "oklahoma city thunder",
     "ny knicks": "new york knicks", "knicks": "new york knicks",
     "sa spurs": "san antonio spurs", "spurs": "san antonio spurs",
     "nola": "new orleans pelicans", "pelicans": "new orleans pelicans",
     "phx": "phoenix suns", "suns": "phoenix suns",
+    # Commonly mismatched
+    "hornets": "charlotte hornets", "charlotte": "charlotte hornets",
+    "nets": "brooklyn nets", "brooklyn": "brooklyn nets",
+    "magic": "orlando magic", "orlando": "orlando magic",
+    "heat": "miami heat", "miami": "miami heat",
+    "bulls": "chicago bulls", "chicago": "chicago bulls",
+    "celtics": "boston celtics", "boston": "boston celtics",
+    "hawks": "atlanta hawks", "atlanta": "atlanta hawks",
+    "pistons": "detroit pistons", "detroit": "detroit pistons",
+    "pacers": "indiana pacers", "indiana": "indiana pacers",
+    "cavaliers": "cleveland cavaliers", "cavs": "cleveland cavaliers", "cleveland": "cleveland cavaliers",
+    "wizards": "washington wizards", "washington": "washington wizards",
+    "raptors": "toronto raptors", "toronto": "toronto raptors",
+    "bucks": "milwaukee bucks", "milwaukee": "milwaukee bucks",
+    "76ers": "philadelphia 76ers", "sixers": "philadelphia 76ers", "philly": "philadelphia 76ers",
+    "nuggets": "denver nuggets", "denver": "denver nuggets",
+    "timberwolves": "minnesota timberwolves", "wolves": "minnesota timberwolves", "minnesota": "minnesota timberwolves",
+    "jazz": "utah jazz", "utah": "utah jazz",
+    "blazers": "portland trail blazers", "portland": "portland trail blazers",
+    "kings": "sacramento kings", "sacramento": "sacramento kings",
+    "grizzlies": "memphis grizzlies", "memphis": "memphis grizzlies",
+    "mavericks": "dallas mavericks", "mavs": "dallas mavericks", "dallas": "dallas mavericks",
+    "rockets": "houston rockets", "houston": "houston rockets",
 }
 
 
